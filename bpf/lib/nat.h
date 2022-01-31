@@ -1341,27 +1341,88 @@ static __always_inline void snat_v6_init_tuple(const struct ipv6hdr *ip6,
 }
 
 static __always_inline bool snat_v6_needed(struct __ctx_buff *ctx,
-					   const union v6addr *addr)
+					   union v6addr *addr)
 {
+	union v6addr masq_addr __maybe_unused;
+	const union v6addr dr_addr = IPV6_DIRECT_ROUTING;
+	struct remote_endpoint_info *remote_ep __maybe_unused;
+	struct endpoint_info *local_ep __maybe_unused;
 	void *data, *data_end;
 	struct ipv6hdr *ip6;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
 		return false;
-#ifdef ENABLE_DSR_HYBRID
-	{
-		__u8 nexthdr = ip6->nexthdr;
-		int ret;
 
-		ret = ipv6_hdrlen(ctx, &nexthdr);
-		if (ret > 0) {
-			if (nodeport_uses_dsr(nexthdr))
-				return false;
+	/* See comment in snat_v4_prepare_state(). */
+	if (DIRECT_ROUTING_DEV_IFINDEX == NATIVE_DEV_IFINDEX &&
+	    !ipv6_addrcmp((union v6addr *)&ip6->saddr, &dr_addr)) {
+		ipv6_addr_copy(addr, &dr_addr);
+		return true;
+	}
+#ifdef ENABLE_MASQUERADE
+	BPF_V6(masq_addr, IPV6_MASQUERADE);
+	if (!ipv6_addrcmp((union v6addr *)&ip6->saddr, &masq_addr)) {
+		ipv6_addr_copy(addr, &masq_addr);
+		return true;
+	}
+#endif
+
+#ifdef ENABLE_MASQUERADE /* SNAT local pod to world packets */
+# ifdef IS_BPF_OVERLAY
+	/* See comment in snat_v4_prepare_state(). */
+	return false;
+# endif /* IS_BPF_OVERLAY */
+
+# ifdef IPV6_SNAT_EXCLUSION_DST_CIDR
+	{
+		union v6addr excl_cidr_mask = IPV6_SNAT_EXCLUSION_DST_CIDR_MASK;
+		union v6addr excl_cidr = IPV6_SNAT_EXCLUSION_DST_CIDR;
+
+		/* See comment in snat_v4_prepare_state(). */
+		if (ipv6_addr_in_net((union v6addr *)&ip6->daddr, &excl_cidr,
+				     &excl_cidr_mask))
+			return false;
+	}
+# endif /* IPV6_SNAT_EXCLUSION_DST_CIDR */
+
+	/* if this is a localhost endpoint, no SNAT is needed */
+	local_ep = __lookup_ip6_endpoint((union v6addr *)&ip6->saddr);
+	if (local_ep && (local_ep->flags & ENDPOINT_F_HOST))
+		return false;
+
+	remote_ep = lookup_ip6_remote_endpoint((union v6addr *)&ip6->daddr, 0);
+	if (remote_ep) {
+		bool is_reply = false;
+
+# ifndef TUNNEL_MODE
+		/* See comment in snat_v4_prepare_state(). */
+		if (identity_is_remote_node(remote_ep->sec_label))
+			return false;
+# endif /* TUNNEL_MODE */
+
+		/* See comment in snat_v4_prepare_state(). */
+		if (local_ep) {
+			struct ipv6_ct_tuple tuple = {};
+			int l4_off;
+
+			tuple.nexthdr = ip6->nexthdr;
+			ipv6_addr_copy(&tuple.daddr, (union v6addr *)&ip6->daddr);
+			ipv6_addr_copy(&tuple.saddr, (union v6addr *)&ip6->saddr);
+
+			l4_off = ETH_HLEN + ipv6_hdrlen(ctx, &ip6->nexthdr);
+			ct_is_reply6(get_ct_map6(&tuple), ctx, l4_off, &tuple,
+				     &is_reply);
+		}
+
+		/* See comment in snat_v4_prepare_state(). */
+		if (!is_reply && local_ep) {
+			ipv6_addr_copy(addr, &masq_addr);
+			return true;
 		}
 	}
-#endif /* ENABLE_DSR_HYBRID */
-	/* See snat_v4_prepare_state(). */
-	return !ipv6_addrcmp((union v6addr *)&ip6->saddr, addr);
+#endif /* ENABLE_MASQUERADE */
+
+	return false;
 }
 
 static __always_inline __maybe_unused int
