@@ -982,7 +982,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	// BPF masquerade depends on BPF NodePort and require socket-LB to
 	// be enabled in the tunneling mode, so the following checks should
 	// happen after invoking initKubeProxyReplacementOptions().
-	if option.Config.EnableIPv4Masquerade && option.Config.EnableBPFMasquerade {
+	if option.Config.MasqueradingEnabled() && option.Config.EnableBPFMasquerade {
 
 		var err error
 		switch {
@@ -1034,11 +1034,11 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 					"if the same endpoint is selected both by an egress gateway and a L7 policy, endpoint traffic will not go through egress gateway.", option.EnableL7Proxy)
 		}
 	}
-	if option.Config.EnableIPv4Masquerade && option.Config.EnableBPFMasquerade {
+	if option.Config.MasqueradingEnabled() && option.Config.EnableBPFMasquerade {
 		// TODO(brb) nodeport constraints will be lifted once the SNAT BPF code has been refactored
 		if err := node.InitBPFMasqueradeAddrs(option.Config.GetDevices()); err != nil {
-			log.WithError(err).Error("failed to determine BPF masquerade IPv4 addrs")
-			return nil, nil, fmt.Errorf("failed to determine BPF masquerade IPv4 addrs: %w", err)
+			log.WithError(err).Error("failed to determine BPF masquerade addrs")
+			return nil, nil, fmt.Errorf("failed to determine BPF masquerade addrs: %w", err)
 		}
 	} else if option.Config.EnableIPMasqAgent {
 		log.WithError(err).Errorf("BPF ip-masq-agent requires --%s=\"true\" and --%s=\"true\"", option.EnableIPv4Masquerade, option.EnableBPFMasquerade)
@@ -1046,9 +1046,9 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	} else if option.Config.EnableIPv4EgressGateway {
 		log.WithError(err).Errorf("egress gateway requires --%s=\"true\" and --%s=\"true\"", option.EnableIPv4Masquerade, option.EnableBPFMasquerade)
 		return nil, nil, fmt.Errorf("egress gateway requires --%s=\"true\" and --%s=\"true\"", option.EnableIPv4Masquerade, option.EnableBPFMasquerade)
-	} else if !option.Config.EnableIPv4Masquerade && option.Config.EnableBPFMasquerade {
+	} else if !option.Config.MasqueradingEnabled() && option.Config.EnableBPFMasquerade {
 		// There is not yet support for option.Config.EnableIPv6Masquerade
-		log.Infof("Auto-disabling %q feature since IPv4 masquerading was generally disabled",
+		log.Infof("Auto-disabling %q feature since IPv4 and IPv6 masquerading are disabled",
 			option.EnableBPFMasquerade)
 		option.Config.EnableBPFMasquerade = false
 	}
@@ -1355,7 +1355,7 @@ func (d *Daemon) bootstrapClusterMesh(nodeMngr nodemanager.NodeManager) {
 func (d *Daemon) ReloadOnDeviceChange(devices []string) {
 	option.Config.SetDevices(devices)
 
-	if option.Config.EnableIPv4Masquerade && option.Config.EnableBPFMasquerade {
+	if option.Config.MasqueradingEnabled() && option.Config.EnableBPFMasquerade {
 		if err := node.InitBPFMasqueradeAddrs(devices); err != nil {
 			log.Warnf("InitBPFMasqueradeAddrs failed: %s", err)
 		}
