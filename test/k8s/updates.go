@@ -244,6 +244,12 @@ func InstallAndValidateCiliumUpgrades(kubectl *helpers.Kubectl, oldHelmChartVers
 			"hubble.relay.image.repository":          "quay.io/cilium/hubble-relay-ci",
 			"clustermesh.apiserver.image.repository": "quay.io/cilium/clustermesh-apiserver-ci",
 		}
+		if helpers.RunsOn419OrLaterKernel() {
+			// Cilium v1.13 doesn't support IPv6 BPF masquerade.
+			// This can be removed once v1.14 is released.
+			Expect(oldHelmChartVersion).To(Equal("1.13"))
+			opts["enableIPv6Masquerade"] = "false"
+		}
 
 		hasNewHelmValues := versioncheck.MustCompile(">=1.12.90")
 		if hasNewHelmValues(versioncheck.MustVersion(newHelmChartVersion)) {
