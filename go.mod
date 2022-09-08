@@ -90,6 +90,7 @@ require (
 	go.uber.org/goleak v1.2.0
 	go.uber.org/multierr v1.9.0
 	go.universe.tf/metallb v0.11.0
+	go4.org/netipx v0.0.0-20220925034521-797b0c90d8ab
 	golang.org/x/crypto v0.5.0
 	golang.org/x/exp v0.0.0-20221106115401-f9659909a136
 	golang.org/x/net v0.7.0

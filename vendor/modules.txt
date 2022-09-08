@@ -965,6 +965,9 @@ go.universe.tf/metallb/pkg/k8s
 go.universe.tf/metallb/pkg/k8s/types
 go.universe.tf/metallb/pkg/layer2
 go.universe.tf/metallb/pkg/speaker
+# go4.org/netipx v0.0.0-20220925034521-797b0c90d8ab
+## explicit; go 1.18
+go4.org/netipx
 # golang.org/x/crypto v0.5.0
 ## explicit; go 1.17
 golang.org/x/crypto/blake2s
