@@ -177,14 +177,12 @@ func (c *crdWatcher) localNodeUpdated(newNode *ciliumv2.CiliumNode) {
 				}
 			}
 		}
-		allocationThreshold := newNode.Spec.IPAM.PodCIDRAllocationThreshold
-		releaseThreshold := newNode.Spec.IPAM.PodCIDRReleaseThreshold
 
 		if c.conf.IPv4Enabled() {
-			c.ipv4Pool = newPodCIDRPool(allocationThreshold, releaseThreshold, releasedIPv4PodCIDRs)
+			c.ipv4Pool = newPodCIDRPool(releasedIPv4PodCIDRs)
 		}
 		if c.conf.IPv6Enabled() {
-			c.ipv6Pool = newPodCIDRPool(allocationThreshold, releaseThreshold, releasedIPv6PodCIDRs)
+			c.ipv6Pool = newPodCIDRPool(releasedIPv6PodCIDRs)
 		}
 	}
 
@@ -270,15 +268,18 @@ func (c *crdWatcher) updateCiliumNodeStatus(ctx context.Context) error {
 		return nil // waiting on localNodeUpdated to be invoked first
 	}
 
+	allocationThreshold := node.Spec.IPAM.PodCIDRAllocationThreshold
+	releaseThreshold := node.Spec.IPAM.PodCIDRReleaseThreshold
+
 	oldStatus := node.Status.IPAM.DeepCopy()
 	node.Status.IPAM.PodCIDRs = types.PodCIDRMap{}
 	if ipv4Pool != nil {
-		for podCIDR, status := range c.ipv4Pool.status() {
+		for podCIDR, status := range c.ipv4Pool.clusterPoolV2Beta1Status(allocationThreshold, releaseThreshold) {
 			node.Status.IPAM.PodCIDRs[podCIDR] = status
 		}
 	}
 	if ipv6Pool != nil {
-		for podCIDR, status := range c.ipv6Pool.status() {
+		for podCIDR, status := range c.ipv6Pool.clusterPoolV2Beta1Status(allocationThreshold, releaseThreshold) {
 			node.Status.IPAM.PodCIDRs[podCIDR] = status
 		}
 	}
