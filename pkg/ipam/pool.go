@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/ipam/service/ipallocator"
 	"github.com/sirupsen/logrus"
 
+	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/ipam/types"
 	"github.com/cilium/cilium/pkg/lock"
@@ -124,6 +125,18 @@ func (p *podCIDRPool) hasAvailableIPs() bool {
 	}
 
 	return false
+}
+
+func (p *podCIDRPool) availablePodCIDRs() []*cidr.CIDR {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	podCIDRs := make([]*cidr.CIDR, 0, len(p.ipAllocators))
+	for _, ipAllocator := range p.ipAllocators {
+		ipnet := ipAllocator.CIDR()
+		podCIDRs = append(podCIDRs, cidr.NewCIDR(&ipnet))
+	}
+	return podCIDRs
 }
 
 func (p *podCIDRPool) inUsePodCIDRsLocked() []string {

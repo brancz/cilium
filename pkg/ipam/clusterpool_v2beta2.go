@@ -32,7 +32,7 @@ type clusterPoolManager struct {
 	owner Owner
 
 	pools        map[string]*poolPair
-	poolsUpdated chan (struct{})
+	poolsUpdated chan struct{}
 
 	node *ciliumv2.CiliumNode
 
@@ -114,10 +114,10 @@ func (c *clusterPoolManager) localAllocCIDRsLocked() (ipv4, ipv6 []*cidr.CIDR) {
 	// first default pool CIDR is supposed to be the primary CIDR
 	if pool, ok := c.pools[defaultPool]; ok {
 		if pool.v4 != nil {
-			//ipv4 = append(ipv4, pool.v4.inUsePodCIDRs()...)
+			ipv4 = append(ipv4, pool.v4.availablePodCIDRs()...)
 		}
 		if pool.v6 != nil {
-			//ipv6 = append(ipv6, pool.v6.inUsePodCIDRs()...)
+			ipv6 = append(ipv6, pool.v6.availablePodCIDRs()...)
 		}
 	}
 
@@ -126,10 +126,10 @@ func (c *clusterPoolManager) localAllocCIDRsLocked() (ipv4, ipv6 []*cidr.CIDR) {
 			continue
 		}
 		if pool.v4 != nil {
-			//ipv4 = append(ipv4, pool.v4.inUsePodCIDRs()...)
+			ipv4 = append(ipv4, pool.v4.availablePodCIDRs()...)
 		}
 		if pool.v6 != nil {
-			//ipv6 = append(ipv6, pool.v6.inUsePodCIDRs()...)
+			ipv6 = append(ipv6, pool.v6.availablePodCIDRs()...)
 		}
 	}
 
