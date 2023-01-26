@@ -293,6 +293,10 @@ func initializeFlags() {
 	flags.StringSlice(option.IPv6PodSubnets, []string{}, "List of IPv6 pod subnets to preconfigure for encryption")
 	option.BindEnv(Vp, option.IPv6PodSubnets)
 
+	flags.Var(option.NewNamedMapOptions(option.IPAMClusterPoolNodePreAlloc, &option.Config.IPAMClusterPoolNodePreAlloc, nil),
+		option.IPAMClusterPoolNodePreAlloc, "List of IP pools which should be pre-allocated on this node")
+	option.BindEnv(Vp, option.IPAMClusterPoolNodePreAlloc)
+
 	flags.StringSlice(option.ExcludeLocalAddress, []string{}, "Exclude CIDR from being recognized as local address")
 	option.BindEnv(Vp, option.ExcludeLocalAddress)
 

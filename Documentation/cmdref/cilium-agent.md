@@ -60,6 +60,7 @@ cilium-agent [flags]
       --cluster-health-port int                                 TCP port for cluster-wide network connectivity health API (default 4240)
       --cluster-id int                                          Unique identifier of the cluster
       --cluster-name string                                     Name of the cluster (default "default")
+      --cluster-pool-node-pre-alloc map                         List of IP pools which should be pre-allocated on this node
       --clustermesh-config string                               Path to the ClusterMesh configuration directory
       --cni-chaining-mode string                                Enable CNI chaining with the specified plugin
       --config string                                           Configuration file (default "$HOME/ciliumd.yaml")

@@ -2,11 +2,13 @@ package ipam
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"golang.org/x/exp/maps"
 
 	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/controller"
@@ -16,6 +18,7 @@ import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/trigger"
 )
 
@@ -26,11 +29,28 @@ type poolPair struct {
 	v6 *podCIDRPool
 }
 
+type preAllocValue int
+type preAllocMap map[string]preAllocValue
+
+func parsePreAllocMap(conf map[string]string) (preAllocMap, error) {
+	m := make(map[string]preAllocValue, len(conf))
+	for pool, s := range conf {
+		value, err := strconv.ParseInt(s, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pre-alloc value for pool %q: %w", pool, err)
+		}
+		m[pool] = preAllocValue(value)
+	}
+
+	return m, nil
+}
+
 type clusterPoolManager struct {
 	mutex *lock.Mutex
 	conf  Configuration
 	owner Owner
 
+	preallocMap  preAllocMap
 	pools        map[string]*poolPair
 	poolsUpdated chan struct{}
 
@@ -46,6 +66,11 @@ type clusterPoolManager struct {
 var _ Allocator = (*clusterPoolManager)(nil)
 
 func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Owner, nodeUpdater nodeUpdater) *clusterPoolManager {
+	preallocMap, err := parsePreAllocMap(option.Config.IPAMClusterPoolNodePreAlloc)
+	if err != nil {
+		log.WithError(err).Fatalf("Invalid %s flag value", option.IPAMClusterPoolNodePreAlloc)
+	}
+
 	k8sController := controller.NewManager()
 	k8sUpdater, err := trigger.NewTrigger(trigger.Parameters{
 		MinInterval: 15 * time.Second,
@@ -63,6 +88,7 @@ func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Ow
 		mutex:           &lock.Mutex{},
 		owner:           owner,
 		conf:            conf,
+		preallocMap:     preallocMap,
 		pools:           map[string]*poolPair{},
 		poolsUpdated:    make(chan struct{}, 1),
 		node:            nil,
@@ -121,6 +147,7 @@ func (c *clusterPoolManager) localAllocCIDRsLocked() (ipv4, ipv6 []*cidr.CIDR) {
 		}
 	}
 
+	// TODO: Should we really have a route for alternate pools?
 	for poolName, pool := range c.pools {
 		if poolName == defaultPool {
 			continue
@@ -140,7 +167,8 @@ func (c *clusterPoolManager) ciliumNodeUpdated(newNode *ciliumv2.CiliumNode) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// initialize pod CIDR pools from existing or new CiliumNode CRD
+	// restore state from previous agent run, this collects (previously)
+	// released CIDRs and ensures they are not used for allocation in this instance either
 	if c.node == nil {
 		for _, pool := range newNode.Status.IPAM.Pools {
 			c.initPoolLocked(pool)
@@ -155,26 +183,54 @@ func (c *clusterPoolManager) ciliumNodeUpdated(newNode *ciliumv2.CiliumNode) {
 	c.node = newNode
 }
 
+func neededIPCeil(numIP int, preAlloc int) int {
+	quotient := numIP / preAlloc
+	rem := numIP % preAlloc
+	if rem > 0 {
+		return (quotient + 2) * preAlloc
+	}
+	return (quotient + 1) * preAlloc
+}
+
 func (c *clusterPoolManager) updateCiliumNode(ctx context.Context) error {
 	c.mutex.Lock()
 	node := c.node.DeepCopy()
 	spec := []types.IPAMPoolRequest{}
 	status := []types.IPAMPoolStatus{}
-	for poolName, pool := range c.pools {
-		cidrs := types.PodCIDRMap{}
+
+	// Only pools present in cluster-pool-node-pre-alloc can be requested
+	for poolName, preAlloc := range c.preallocMap {
 		var neededIPv4, neededIPv6 int
-
-		// TODO how about pools that don't exist yet???
-
-		if pool.v4 != nil {
-			var cidrsIPv4 types.PodCIDRMap
-			//neededIPv4, cidrsIPv4 = pool.v4.clusterPoolV2Beta2(8, 16)
-			maps.Copy(cidrs, cidrsIPv4)
+		pool, ok := c.pools[poolName]
+		if ok {
+			if pool.v4 != nil {
+				neededIPv4 = pool.v4.inUseIPCount()
+			}
+			if pool.v6 != nil {
+				neededIPv6 = pool.v6.inUseIPCount()
+			}
 		}
-		if pool.v6 != nil {
-			var cidrsIPv6 types.PodCIDRMap
-			//neededIPv6, cidrsIPv6 = pool.v6.clusterPoolV2Beta2(8, 16)
-			maps.Copy(cidrs, cidrsIPv6)
+
+		// Always round up to pre-alloc value
+		neededIPv4 = neededIPCeil(neededIPv4, int(preAlloc))
+		neededIPv6 = neededIPCeil(neededIPv6, int(preAlloc))
+
+		if ok {
+			s := types.IPAMPoolStatus{
+				Pool:  poolName,
+				CIDRs: map[string]types.PodCIDRMapEntry{},
+			}
+
+			for releasedCIDR := range pool.v4.releaseExcessCIDRsV2(neededIPv4) {
+				s.CIDRs[releasedCIDR] = types.PodCIDRMapEntry{Status: types.PodCIDRStatusReleased}
+			}
+			for releasedCIDR := range pool.v6.releaseExcessCIDRsV2(neededIPv6) {
+				s.CIDRs[releasedCIDR] = types.PodCIDRMapEntry{Status: types.PodCIDRStatusReleased}
+			}
+
+			if len(s.CIDRs) > 0 {
+				status = append(status, s)
+			}
 		}
 
 		spec = append(spec, types.IPAMPoolRequest{
@@ -184,15 +240,19 @@ func (c *clusterPoolManager) updateCiliumNode(ctx context.Context) error {
 				IPv6Addrs: neededIPv6,
 			},
 		})
-
-		status = append(status, types.IPAMPoolStatus{
-			Pool:  poolName,
-			CIDRs: nil,
-		})
 	}
+	sort.Slice(spec, func(i, j int) bool {
+		return spec[i].Pool > spec[j].Pool
+	})
+	sort.Slice(status, func(i, j int) bool {
+		return status[i].Pool > status[j].Pool
+	})
+
 	node.Spec.IPAM.Pools.Requested = spec
 	node.Status.IPAM.Pools = status
 	c.mutex.Unlock()
+
+	// TODO send to k8s status and spec
 
 	return nil
 }

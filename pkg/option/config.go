@@ -831,6 +831,9 @@ const (
 	// IPAM is the IPAM method to use
 	IPAM = "ipam"
 
+	// IPAMClusterPoolNodePreAlloc contains the list of IP pools which should be pre-allocated on this node
+	IPAMClusterPoolNodePreAlloc = "cluster-pool-node-pre-alloc"
+
 	// XDPModeNative for loading progs with XDPModeLinkDriver
 	XDPModeNative = "native"
 
@@ -2027,6 +2030,9 @@ type DaemonConfig struct {
 
 	// IPAM is the IPAM method to use
 	IPAM string
+
+	// IPAMClusterPoolNodePreAlloc contains the list of IP pools which should be pre-allocated on this node
+	IPAMClusterPoolNodePreAlloc map[string]string
 
 	// Enable chaining with another CNI plugin.
 	CNIChainingMode string
@@ -3306,6 +3312,11 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 		if c.EnableIPv6 {
 			c.K8sRequireIPv6PodCIDR = true
 		}
+	}
+	if m, err := command.GetStringMapStringE(vp, IPAMClusterPoolNodePreAlloc); err != nil {
+		log.Fatalf("unable to parse %s: %s", IPAMClusterPoolNodePreAlloc, err)
+	} else {
+		c.IPAMClusterPoolNodePreAlloc = m
 	}
 
 	c.KubeProxyReplacementHealthzBindAddr = vp.GetString(KubeProxyReplacementHealthzBindAddr)
