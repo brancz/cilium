@@ -1445,6 +1445,10 @@
      - IPv6 CIDR list range to delegate to individual nodes for IPAM.
      - list
      - ``[]``
+   * - ipam.operator.clusterPoolMap
+     - IP pools defined for the cluster-pool-v2beta2 IPAM mode.
+     - object
+     - ``{}``
    * - ipam.operator.externalAPILimitBurstSize
      - The maximum burst size when rate limiting access to external APIs. Also known as the token bucket capacity.
      - string

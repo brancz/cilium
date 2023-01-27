@@ -9,14 +9,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sirupsen/logrus"
+
 	operatorOption "github.com/cilium/cilium/operator/option"
+	"github.com/cilium/cilium/pkg/ipam"
+	"github.com/cilium/cilium/pkg/ipam/allocator"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
-	"github.com/sirupsen/logrus"
-
-	"github.com/cilium/cilium/pkg/ipam"
-	"github.com/cilium/cilium/pkg/ipam/allocator"
 )
 
 var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "ipam-allocator-clusterpool-v2")
@@ -47,24 +47,24 @@ func parsePoolSpec(poolString string) (poolSpec, error) {
 
 	var pool poolSpec
 	for _, field := range fields {
-		kv := strings.Split(field, ":")
-		if len(kv) != 2 {
+		key, value, ok := strings.Cut(field, ":")
+		if !ok {
 			return pool, fmt.Errorf("invalid number of key delimiters in pool spec %s", poolString)
 		}
-		switch kv[0] {
+		switch key {
 		case poolKeyIPv4CIDRs:
-			pool.ipv4CIDRs = strings.Split(kv[1], ",")
+			pool.ipv4CIDRs = strings.Split(value, ",")
 			// TODO: validate individual CIDRs?
 		case poolKeyIPv4MaskSize:
-			mask, err := strconv.Atoi(kv[1])
+			mask, err := strconv.Atoi(value)
 			if err != nil {
 				return pool, fmt.Errorf("invalid value for key %q: %w", poolKeyIPv4MaskSize, err)
 			}
 			pool.ipv4MaskSize = mask
 		case poolKeyIPv6CIDRs:
-			pool.ipv6CIDRs = strings.Split(kv[1], ",")
+			pool.ipv6CIDRs = strings.Split(value, ",")
 		case poolKeyIPv6MaskSize:
-			mask, err := strconv.Atoi(kv[1])
+			mask, err := strconv.Atoi(value)
 			if err != nil {
 				return pool, fmt.Errorf("invalid value for key %q: %w", poolKeyIPv4MaskSize, err)
 			}
