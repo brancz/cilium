@@ -280,27 +280,27 @@ func (c *clusterPoolManager) OnDeleteCiliumNode(node *ciliumv2.CiliumNode, swg *
 	return nil
 }
 
-func (c *clusterPoolManager) Allocate(ip net.IP, owner string) (*AllocationResult, error) {
+func (c *clusterPoolManager) Allocate(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (c *clusterPoolManager) AllocateWithoutSyncUpstream(ip net.IP, owner string) (*AllocationResult, error) {
+func (c *clusterPoolManager) AllocateWithoutSyncUpstream(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (c *clusterPoolManager) Release(ip net.IP) error {
+func (c *clusterPoolManager) Release(ip net.IP, pool Pool) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (c *clusterPoolManager) AllocateNext(owner string) (*AllocationResult, error) {
+func (c *clusterPoolManager) AllocateNext(owner string, pool Pool) (*AllocationResult, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (c *clusterPoolManager) AllocateNextWithoutSyncUpstream(owner string) (*AllocationResult, error) {
+func (c *clusterPoolManager) AllocateNextWithoutSyncUpstream(owner string, pool Pool) (*AllocationResult, error) {
 	//TODO implement me
 	panic("implement me")
 }
