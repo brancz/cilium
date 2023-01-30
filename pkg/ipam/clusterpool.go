@@ -94,6 +94,7 @@ func podCIDRFamily(podCIDR string) Family {
 }
 
 type nodeUpdater interface {
+	Update(ctx context.Context, ciliumNode *ciliumv2.CiliumNode, opts metav1.UpdateOptions) (*ciliumv2.CiliumNode, error)
 	UpdateStatus(ctx context.Context, ciliumNode *ciliumv2.CiliumNode, opts metav1.UpdateOptions) (*ciliumv2.CiliumNode, error)
 }
 

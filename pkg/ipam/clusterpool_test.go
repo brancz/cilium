@@ -39,6 +39,12 @@ func (f *fakeK8sCiliumNodeAPI) UpdateStatus(_ context.Context, ciliumNode *ciliu
 	return ciliumNode, err
 }
 
+// UpdateStatus implements nodeUpdater
+func (f *fakeK8sCiliumNodeAPI) Update(_ context.Context, ciliumNode *ciliumv2.CiliumNode, _ v1.UpdateOptions) (*ciliumv2.CiliumNode, error) {
+	err := f.updateNode(ciliumNode)
+	return ciliumNode, err
+}
+
 // currentNode returns a the current snapshot of the node
 func (f *fakeK8sCiliumNodeAPI) currentNode() *ciliumv2.CiliumNode {
 	f.mutex.Lock()
