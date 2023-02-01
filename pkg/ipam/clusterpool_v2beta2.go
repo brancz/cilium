@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"go.uber.org/multierr"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/controller"
@@ -194,7 +196,7 @@ func neededIPCeil(numIP int, preAlloc int) int {
 
 func (c *clusterPoolManager) updateCiliumNode(ctx context.Context) error {
 	c.mutex.Lock()
-	node := c.node.DeepCopy()
+	newNode := c.node.DeepCopy()
 	spec := []types.IPAMPoolRequest{}
 	status := []types.IPAMPoolStatus{}
 
@@ -248,13 +250,36 @@ func (c *clusterPoolManager) updateCiliumNode(ctx context.Context) error {
 		return status[i].Pool > status[j].Pool
 	})
 
-	node.Spec.IPAM.Pools.Requested = spec
-	node.Status.IPAM.Pools = status
+	newNode.Spec.IPAM.Pools.Requested = spec
+	newNode.Status.IPAM.Pools = status
+
+	needsSpecUpdate := !newNode.Spec.IPAM.DeepEqual(&c.node.Spec.IPAM)
+	needsStatusUpdate := !newNode.Status.IPAM.DeepEqual(&c.node.Status.IPAM)
+
 	c.mutex.Unlock()
 
-	// TODO send to k8s status and spec
+	// TODO: Validate that this order of updates is safe with regard to CIDRs
+	// referred to in Spec vs Status. Especially need to check that the status
+	// update triggers the cilium-operator to re-check the spec (in case CIDRs
+	// were released)
 
-	return nil
+	var controllerErr error
+	if needsSpecUpdate {
+		_, err := c.nodeUpdater.Update(ctx, newNode, metav1.UpdateOptions{})
+		if err != nil {
+			controllerErr = multierr.Append(controllerErr, fmt.Errorf("failed to update node spec: %w", err))
+		}
+	}
+
+	if needsStatusUpdate {
+		_, err := c.nodeUpdater.UpdateStatus(ctx, newNode, metav1.UpdateOptions{})
+		if err != nil {
+			controllerErr = multierr.Append(controllerErr, fmt.Errorf("failed to update node status: %w", err))
+		}
+	}
+
+	// TODO: Should we refetch c.node if controllerErr != nil
+	return controllerErr
 }
 
 func (c *clusterPoolManager) initPoolLocked(pool types.IPAMPoolStatus) {
