@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/cilium/pkg/ipam/types"
 	"github.com/cilium/cilium/pkg/k8s"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	"github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
@@ -65,9 +66,9 @@ type clusterPoolManager struct {
 	finishedRestore bool
 }
 
-var _ Allocator = (*clusterPoolManager)(nil)
+var _ Allocator = (*clusterPoolV2Allocator)(nil)
 
-func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Owner, nodeUpdater nodeUpdater) *clusterPoolManager {
+func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Owner, clientset client.Clientset) *clusterPoolManager {
 	preallocMap, err := parsePreAllocMap(option.Config.IPAMClusterPoolNodePreAlloc)
 	if err != nil {
 		log.WithError(err).Fatalf("Invalid %s flag value", option.IPAMClusterPoolNodePreAlloc)
@@ -96,7 +97,7 @@ func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Ow
 		node:            nil,
 		controller:      k8sController,
 		k8sUpdater:      k8sUpdater,
-		nodeUpdater:     nodeUpdater,
+		nodeUpdater:     clientset.CiliumV2().CiliumNodes(),
 		finishedRestore: false,
 	}
 
@@ -365,37 +366,7 @@ func (c *clusterPoolManager) OnDeleteCiliumNode(node *ciliumv2.CiliumNode, swg *
 	return nil
 }
 
-func (c *clusterPoolManager) Allocate(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *clusterPoolManager) AllocateWithoutSyncUpstream(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *clusterPoolManager) Release(ip net.IP, pool Pool) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *clusterPoolManager) AllocateNext(owner string, pool Pool) (*AllocationResult, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *clusterPoolManager) AllocateNextWithoutSyncUpstream(owner string, pool Pool) (*AllocationResult, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *clusterPoolManager) Dump() (map[string]string, string) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (c *clusterPoolManager) RestoreFinished() {
+func (c *clusterPoolManager) restoreFinished() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if c.finishedRestore {
@@ -407,4 +378,118 @@ func (c *clusterPoolManager) RestoreFinished() {
 		DoFunc: c.updateCiliumNode,
 	})
 	c.finishedRestore = true
+}
+
+func (c *clusterPoolManager) poolByFamilyLocked(poolName string, family Family) *podCIDRPool {
+	switch family {
+	case IPv4:
+		pair, ok := c.pools[poolName]
+		if ok {
+			return pair.v4
+		}
+	case IPv6:
+		pair, ok := c.pools[poolName]
+		if ok {
+			return pair.v6
+		}
+	}
+
+	return nil
+}
+
+func (c *clusterPoolManager) allocateNext(owner string, poolName Pool, family Family, syncUpstream bool) (*AllocationResult, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	pool := c.poolByFamilyLocked(poolName.String(), family)
+	if pool == nil {
+		return nil, fmt.Errorf("unable to allocate from unknown pool %q (family %s)", poolName, family)
+	}
+
+	ip, err := pool.allocateNext()
+	if err != nil {
+		return nil, err
+	}
+
+	if syncUpstream {
+		c.k8sUpdater.TriggerWithReason("allocation of next IP")
+	}
+	return &AllocationResult{IP: ip}, nil
+}
+
+func (c *clusterPoolManager) allocateIP(ip net.IP, owner string, poolName Pool, family Family, syncUpstream bool) (*AllocationResult, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	pool := c.poolByFamilyLocked(poolName.String(), family)
+	if pool == nil {
+		return nil, fmt.Errorf("unable to reserve IP %s from unknown pool %q (family %s)", ip, poolName, family)
+	}
+
+	err := pool.allocate(ip)
+	if err != nil {
+		return nil, err
+	}
+
+	if syncUpstream {
+		c.k8sUpdater.TriggerWithReason("allocation of IP")
+	}
+	return &AllocationResult{IP: ip}, nil
+}
+
+func (c *clusterPoolManager) releaseIP(ip net.IP, poolName Pool, family Family) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	pool := c.poolByFamilyLocked(poolName.String(), family)
+	if pool == nil {
+		return fmt.Errorf("unable to release IP %s of unknown pool %q (family %s)", ip, poolName, family)
+	}
+
+	err := pool.release(ip)
+	if err == nil {
+		c.k8sUpdater.TriggerWithReason("release of IP")
+	}
+	return err
+}
+
+func (c *clusterPoolManager) Allocator(family Family) Allocator {
+	return &clusterPoolV2Allocator{
+		manager: c,
+		family:  family,
+	}
+}
+
+type clusterPoolV2Allocator struct {
+	manager *clusterPoolManager
+	family  Family
+}
+
+func (c *clusterPoolV2Allocator) Allocate(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
+	return c.manager.allocateIP(ip, owner, pool, c.family, true)
+}
+
+func (c *clusterPoolV2Allocator) AllocateWithoutSyncUpstream(ip net.IP, owner string, pool Pool) (*AllocationResult, error) {
+	return c.manager.allocateIP(ip, owner, pool, c.family, false)
+}
+
+func (c *clusterPoolV2Allocator) Release(ip net.IP, pool Pool) error {
+	return c.manager.releaseIP(ip, pool, c.family)
+}
+
+func (c *clusterPoolV2Allocator) AllocateNext(owner string, pool Pool) (*AllocationResult, error) {
+	return c.manager.allocateNext(owner, pool, c.family, true)
+}
+
+func (c *clusterPoolV2Allocator) AllocateNextWithoutSyncUpstream(owner string, pool Pool) (*AllocationResult, error) {
+	return c.manager.allocateNext(owner, pool, c.family, false)
+}
+
+func (c *clusterPoolV2Allocator) Dump() (map[string]string, string) {
+	//TODO implement me
+	return nil, "implement me"
+}
+
+func (c *clusterPoolV2Allocator) RestoreFinished() {
+	c.manager.restoreFinished()
 }

@@ -130,6 +130,10 @@ func (ipam *IPAM) GetVpcCIDRs() (vpcCIDRs []*cidr.CIDR) {
 // Pool is the the IP pool from which to allocate.
 type Pool string
 
+func (p Pool) String() string {
+	return string(p)
+}
+
 const (
 	PoolDefault Pool = ipamOption.PoolDefault
 )
