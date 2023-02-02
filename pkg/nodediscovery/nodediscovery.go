@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/ipam"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
+	ipamTypes "github.com/cilium/cilium/pkg/ipam/types"
 	"github.com/cilium/cilium/pkg/k8s"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/k8s/client"
@@ -546,6 +548,22 @@ func (n *NodeDiscovery) mutateNodeResource(nodeResource *ciliumv2.CiliumNode) er
 		if c := n.NetConf; c != nil {
 			nodeResource.Spec.IPAM.PodCIDRAllocationThreshold = c.IPAM.PodCIDRAllocationThreshold
 			nodeResource.Spec.IPAM.PodCIDRReleaseThreshold = c.IPAM.PodCIDRReleaseThreshold
+		}
+	case ipamOption.IPAMClusterPoolV2Beta2:
+		if len(nodeResource.Spec.IPAM.Pools.Requested) == 0 {
+			for pool, s := range option.Config.IPAMClusterPoolNodePreAlloc {
+				value, err := strconv.Atoi(s)
+				if err != nil {
+					continue
+				}
+				nodeResource.Spec.IPAM.Pools.Requested = append(nodeResource.Spec.IPAM.Pools.Requested, ipamTypes.IPAMPoolRequest{
+					Pool: pool,
+					Needed: ipamTypes.IPAMPoolDemand{
+						IPv4Addrs: value,
+						IPv6Addrs: value,
+					},
+				})
+			}
 		}
 	case ipamOption.IPAMENI:
 		// set ENI field in the node only when the ENI ipam is specified
