@@ -115,11 +115,11 @@ func (c *clusterPoolManager) waitForPool(ctx context.Context, family Family, poo
 		c.mutex.Lock()
 		switch family {
 		case IPv4:
-			if p, ok := c.pools[poolName]; ok && p.v4.hasAvailableIPs() {
+			if p, ok := c.pools[poolName]; ok && p.v4 != nil && p.v4.hasAvailableIPs() {
 				return
 			}
 		case IPv6:
-			if p, ok := c.pools[poolName]; ok && p.v6.hasAvailableIPs() {
+			if p, ok := c.pools[poolName]; ok && p.v6 != nil && p.v6.hasAvailableIPs() {
 				return
 			}
 		}
@@ -224,11 +224,15 @@ func (c *clusterPoolManager) updateCiliumNode(ctx context.Context) error {
 				CIDRs: map[string]types.PodCIDRMapEntry{},
 			}
 
-			for releasedCIDR := range pool.v4.releaseExcessCIDRsV2(neededIPv4) {
-				s.CIDRs[releasedCIDR] = types.PodCIDRMapEntry{Status: types.PodCIDRStatusReleased}
+			if pool.v4 != nil {
+				for releasedCIDR := range pool.v4.releaseExcessCIDRsV2(neededIPv4) {
+					s.CIDRs[releasedCIDR] = types.PodCIDRMapEntry{Status: types.PodCIDRStatusReleased}
+				}
 			}
-			for releasedCIDR := range pool.v6.releaseExcessCIDRsV2(neededIPv6) {
-				s.CIDRs[releasedCIDR] = types.PodCIDRMapEntry{Status: types.PodCIDRStatusReleased}
+			if pool.v6 != nil {
+				for releasedCIDR := range pool.v6.releaseExcessCIDRsV2(neededIPv6) {
+					s.CIDRs[releasedCIDR] = types.PodCIDRMapEntry{Status: types.PodCIDRStatusReleased}
+				}
 			}
 
 			if len(s.CIDRs) > 0 {
@@ -333,8 +337,14 @@ func (c *clusterPoolManager) upsertPoolLocked(poolName string, podCIDRs []string
 		}
 	}
 
-	pool.v4.updatePool(ipv4PodCIDRs)
-	pool.v6.updatePool(ipv6PodCIDRs)
+	if pool.v4 != nil {
+		pool.v4.updatePool(ipv4PodCIDRs)
+	}
+	if pool.v6 != nil {
+		pool.v6.updatePool(ipv6PodCIDRs)
+	}
+
+	c.pools[poolName] = pool
 
 	select {
 	case c.poolsUpdated <- struct{}{}:
