@@ -1205,7 +1205,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup,
 	// Trigger refresh and update custom resource in the apiserver with all restored endpoints.
 	// Trigger after nodeDiscovery.StartDiscovery to avoid custom resource update conflict.
 	if option.Config.IPAM == ipamOption.IPAMCRD || option.Config.IPAM == ipamOption.IPAMENI || option.Config.IPAM == ipamOption.IPAMAzure ||
-		option.Config.IPAM == ipamOption.IPAMAlibabaCloud || option.Config.IPAM == ipamOption.IPAMClusterPoolV2 {
+		option.Config.IPAM == ipamOption.IPAMAlibabaCloud || option.Config.IPAM == ipamOption.IPAMClusterPoolV2 || option.Config.IPAM == ipamOption.IPAMClusterPoolV2Beta2 {
 		if option.Config.EnableIPv6 {
 			d.ipam.IPv6Allocator.RestoreFinished()
 		}

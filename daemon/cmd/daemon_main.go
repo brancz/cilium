@@ -1488,12 +1488,12 @@ func initEnv() {
 		)
 	}
 
-	if option.Config.IPAM == ipamOption.IPAMClusterPoolV2 {
+	if option.Config.IPAM == ipamOption.IPAMClusterPoolV2 || option.Config.IPAM == ipamOption.IPAMClusterPoolV2Beta2 {
 		if option.Config.TunnelingEnabled() {
-			log.Fatalf("Cannot specify IPAM mode %s in tunnel mode.", ipamOption.IPAMClusterPoolV2)
+			log.Fatalf("Cannot specify IPAM mode %s in tunnel mode.", option.Config.IPAM)
 		}
 		if option.Config.EnableIPSec {
-			log.Fatalf("Cannot specify IPAM mode %s with %s.", ipamOption.IPAMClusterPoolV2, option.EnableIPSecName)
+			log.Fatalf("Cannot specify IPAM mode %s with %s.", option.Config.IPAM, option.EnableIPSecName)
 		}
 	}
 
