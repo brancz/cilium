@@ -99,7 +99,7 @@ MAX_BASE_OPTIONS += -DENABLE_TPROXY=1 -DENABLE_HOST_ROUTING=1 -DENABLE_BANDWIDTH
 	-DETH_HLEN=0 -DENABLE_WIREGUARD
 endif
 # Egress Gateway should only be enabled for >= 5.2 kernels
-ifneq (,$(filter $(KERNEL),"54" "netnext"))
+ifneq ("",$(filter $(KERNEL),"54" "netnext"))
 MAX_BASE_OPTIONS += -DENABLE_EGRESS_GATEWAY=1
 endif
 
