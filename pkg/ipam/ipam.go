@@ -174,13 +174,14 @@ func NewIPAM(nodeAddressing types.NodeAddressing, c Configuration, owner Owner, 
 // change and suddenly cover the IP to be excluded.
 func (ipam *IPAM) ExcludeIP(ip net.IP, owner string, pool Pool) {
 	ipam.allocatorMutex.Lock()
-	ipam.excludedIPs[ip.String()] = owner
+	ipam.excludedIPs[pool.String()+":"+ip.String()] = owner
 	ipam.allocatorMutex.Unlock()
 }
 
 // isIPExcluded is used to check if a particular IP is excluded from being allocated.
-func (ipam *IPAM) isIPExcluded(ip net.IP) (string, bool) {
-	return ipam.excludedIPs[ip.String()]
+func (ipam *IPAM) isIPExcluded(ip net.IP, pool Pool) (string, bool) {
+	owner, ok := ipam.excludedIPs[pool.String()+":"+ip.String()]
+	return owner, ok
 }
 
 // PoolOrDefault returns the default pool if no pool is specified.
