@@ -4,6 +4,7 @@
 package v2
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/netip"
@@ -59,7 +60,7 @@ func (m errAllocatorNotReady) Error() string {
 }
 
 func (m errAllocatorNotReady) Is(target error) bool {
-	return target == ErrAllocatorNotReady
+	return errors.Is(target, ErrAllocatorNotReady)
 }
 
 type PoolAllocator struct {
