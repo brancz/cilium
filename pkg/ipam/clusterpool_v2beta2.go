@@ -78,7 +78,6 @@ func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Ow
 	k8sUpdater, err := trigger.NewTrigger(trigger.Parameters{
 		MinInterval: 15 * time.Second,
 		TriggerFunc: func(reasons []string) {
-			// this is a no-op before controller is instantiated in restoreFinished
 			k8sController.TriggerController(clusterPoolStatusControllerName)
 		},
 		Name: clusterPoolStatusTriggerName,
@@ -105,7 +104,21 @@ func newClusterPoolManager(conf Configuration, nodeWatcher nodeWatcher, owner Ow
 	nodeWatcher.RegisterCiliumNodeSubscriber(c)
 	owner.UpdateCiliumNodeResource()
 
+	c.waitForAllPools()
+
 	return c
+}
+
+func (c *clusterPoolManager) waitForAllPools() {
+	ctx := context.Background()
+	for pool := range c.preallocMap {
+		if c.conf.IPv4Enabled() {
+			c.waitForPool(ctx, IPv4, pool)
+		}
+		if c.conf.IPv6Enabled() {
+			c.waitForPool(ctx, IPv6, pool)
+		}
+	}
 }
 
 func (c *clusterPoolManager) waitForPool(ctx context.Context, family Family, poolName string) {
@@ -116,10 +129,12 @@ func (c *clusterPoolManager) waitForPool(ctx context.Context, family Family, poo
 		switch family {
 		case IPv4:
 			if p, ok := c.pools[poolName]; ok && p.v4 != nil && p.v4.hasAvailableIPs() {
+				c.mutex.Unlock()
 				return
 			}
 		case IPv6:
 			if p, ok := c.pools[poolName]; ok && p.v6 != nil && p.v6.hasAvailableIPs() {
+				c.mutex.Unlock()
 				return
 			}
 		}
@@ -176,6 +191,12 @@ func (c *clusterPoolManager) ciliumNodeUpdated(newNode *ciliumv2.CiliumNode) {
 		for _, pool := range newNode.Status.IPAM.Pools {
 			c.initPoolLocked(pool)
 		}
+
+		// This enables the upstream sync controller. It requires c.node to be populated.
+		// Note: The controller will only run after c.mutex is unlocked
+		c.controller.UpdateController(clusterPoolStatusControllerName, controller.ControllerParams{
+			DoFunc: c.updateCiliumNode,
+		})
 	}
 
 	for _, pool := range newNode.Spec.IPAM.Pools.Allocated {
@@ -215,8 +236,12 @@ func (c *clusterPoolManager) updateCiliumNode(ctx context.Context) error {
 		}
 
 		// Always round up to pre-alloc value
-		neededIPv4 = neededIPCeil(neededIPv4, int(preAlloc))
-		neededIPv6 = neededIPCeil(neededIPv6, int(preAlloc))
+		if c.conf.IPv4Enabled() {
+			neededIPv4 = neededIPCeil(neededIPv4, int(preAlloc))
+		}
+		if c.conf.IPv6Enabled() {
+			neededIPv6 = neededIPCeil(neededIPv6, int(preAlloc))
+		}
 
 		if ok {
 			s := types.IPAMPoolStatus{
@@ -376,19 +401,7 @@ func (c *clusterPoolManager) OnDeleteCiliumNode(node *ciliumv2.CiliumNode, swg *
 	return nil
 }
 
-func (c *clusterPoolManager) restoreFinished() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	if c.finishedRestore {
-		return
-	}
-
-	// creating a new controller will execute DoFunc immediately
-	c.controller.UpdateController(clusterPoolStatusControllerName, controller.ControllerParams{
-		DoFunc: c.updateCiliumNode,
-	})
-	c.finishedRestore = true
-}
+func (c *clusterPoolManager) restoreFinished() {}
 
 func (c *clusterPoolManager) poolByFamilyLocked(poolName string, family Family) *podCIDRPool {
 	switch family {
