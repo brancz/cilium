@@ -404,7 +404,40 @@ func (c *clusterPoolManager) OnDeleteCiliumNode(node *ciliumv2.CiliumNode, swg *
 	return nil
 }
 
-func (c *clusterPoolManager) restoreFinished() {}
+func (c *clusterPoolManager) dump(family Family) (allocated map[string]string, status string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	allocated = map[string]string{}
+	for poolName, pool := range c.pools {
+		var p *podCIDRPool
+		switch family {
+		case IPv4:
+			p = pool.v4
+		case IPv6:
+			p = pool.v6
+		}
+		if p == nil {
+			return nil, fmt.Sprintf("family %q not supported", family)
+		}
+
+		ipToOwner, _, _, _, err := p.dump()
+		if err != nil {
+			return nil, fmt.Sprintf("error: %s", err)
+		}
+
+		ipPrefix := ""
+		if poolName != PoolDefault.String() {
+			ipPrefix = poolName + "/"
+		}
+
+		for ip, owner := range ipToOwner {
+			allocated[ipPrefix+ip] = owner
+		}
+	}
+
+	return allocated, fmt.Sprintf("%d IPAM pool(s) available", len(c.pools))
+}
 
 func (c *clusterPoolManager) poolByFamilyLocked(poolName string, family Family) *podCIDRPool {
 	switch family {
@@ -512,10 +545,7 @@ func (c *clusterPoolV2Allocator) AllocateNextWithoutSyncUpstream(owner string, p
 }
 
 func (c *clusterPoolV2Allocator) Dump() (map[string]string, string) {
-	//TODO implement me
-	return nil, "implement me"
+	return c.manager.dump(c.family)
 }
 
-func (c *clusterPoolV2Allocator) RestoreFinished() {
-	c.manager.restoreFinished()
-}
+func (c *clusterPoolV2Allocator) RestoreFinished() {}
