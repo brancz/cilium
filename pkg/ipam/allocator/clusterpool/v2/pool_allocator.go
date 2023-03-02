@@ -6,10 +6,11 @@ package v2
 import (
 	"errors"
 	"fmt"
-	"math"
+	"math/big"
 	"net/netip"
 	"sort"
 
+	"github.com/sirupsen/logrus"
 	"go.uber.org/multierr"
 
 	"github.com/cilium/cilium/pkg/ipam"
@@ -36,12 +37,12 @@ func (c cidrSet) StringSlice() []string {
 }
 
 // availableAddrBits returns the log2(availableIPs) of this CIDR set
-func (c cidrSet) availableAddrBits() int {
-	bits := 0
+func (c cidrSet) availableAddrs() *big.Int {
+	total := big.NewInt(0)
 	for p := range c {
-		bits += p.Addr().BitLen() - p.Bits()
+		total.Add(total, addrsInPrefix(p))
 	}
-	return bits
+	return total
 }
 
 type cidrSets struct {
@@ -61,6 +62,20 @@ func (m errAllocatorNotReady) Error() string {
 
 func (m errAllocatorNotReady) Is(target error) bool {
 	return errors.Is(target, ErrAllocatorNotReady)
+}
+
+func addrsInPrefix(p netip.Prefix) *big.Int {
+	// compute number of addresses in prefix, i.e. 2^bits
+	addrs := new(big.Int)
+	addrs.Lsh(big.NewInt(1), uint(p.Addr().BitLen()-p.Bits()))
+	// subtract network and broadcast address, which are not available for
+	// allocation in the cilium/ipam library for now
+	addrs.Sub(addrs, big.NewInt(2))
+	if addrs.Sign() < 0 {
+		return big.NewInt(0)
+	}
+
+	return addrs
 }
 
 type PoolAllocator struct {
@@ -162,19 +177,19 @@ func (p *PoolAllocator) AllocateToNode(cn *v2.CiliumNode) error {
 		allocatedCIDRs := p.nodes[cn.Name][reqPool.Pool]
 
 		if option.Config.EnableIPv4 {
-			neededIPv4Bits := int(math.Ceil(math.Log2(float64(reqPool.Needed.IPv4Addrs))))
-			missingIPv4Bits := neededIPv4Bits - allocatedCIDRs.v4.availableAddrBits()
+			neededIPv4Addrs := big.NewInt(int64(reqPool.Needed.IPv4Addrs))
+			neededIPv4Addrs.Sub(neededIPv4Addrs, allocatedCIDRs.v4.availableAddrs())
 
-			allocErr := p.allocateCIDRs(cn.Name, reqPool.Pool, ipam.IPv4, missingIPv4Bits)
+			allocErr := p.allocateCIDRs(cn.Name, reqPool.Pool, ipam.IPv4, neededIPv4Addrs)
 			if allocErr != nil {
 				err = multierr.Append(err, fmt.Errorf("ipv4: %w", allocErr))
 			}
 		}
 		if option.Config.EnableIPv6 {
-			neededIPv6Bits := int(math.Ceil(math.Log2(float64(reqPool.Needed.IPv6Addrs))))
-			missingIPv6Bits := neededIPv6Bits - allocatedCIDRs.v6.availableAddrBits()
+			neededIPv4Addrs := big.NewInt(int64(reqPool.Needed.IPv6Addrs))
+			neededIPv4Addrs.Sub(neededIPv4Addrs, allocatedCIDRs.v6.availableAddrs())
 
-			allocErr := p.allocateCIDRs(cn.Name, reqPool.Pool, ipam.IPv6, missingIPv6Bits)
+			allocErr := p.allocateCIDRs(cn.Name, reqPool.Pool, ipam.IPv6, neededIPv4Addrs)
 			if allocErr != nil {
 				err = multierr.Append(err, fmt.Errorf("ipv6: %w", allocErr))
 			}
@@ -286,20 +301,28 @@ func (p *PoolAllocator) markReleased(targetNode, sourcePool string, cidr netip.P
 	}
 }
 
-func (p *PoolAllocator) allocateCIDRs(targetNode, sourcePool string, family ipam.Family, sizeBits int) error {
+func (p *PoolAllocator) allocateCIDRs(targetNode, sourcePool string, family ipam.Family, neededIPs *big.Int) error {
 	pool, ok := p.pools[sourcePool]
 	if !ok {
 		return fmt.Errorf("cannot allocate from non-existing pool: %s", sourcePool)
 	}
 
-	for sizeBits > 0 {
+	log.WithFields(logrus.Fields{
+		"targetNode": targetNode,
+		"sourcePool": sourcePool,
+		"family":     family,
+		"neededIPs":  neededIPs,
+	}).Debug("allocating cidr")
+
+	zero := new(big.Int)
+	for neededIPs.Cmp(zero) > 0 {
 		cidr, err := pool.allocCIDR(family)
 		if err != nil {
 			return err
 		}
 
 		p.markAllocated(targetNode, sourcePool, cidr)
-		sizeBits -= cidr.Addr().BitLen() - cidr.Bits()
+		neededIPs.Sub(neededIPs, addrsInPrefix(cidr))
 	}
 
 	return nil
@@ -310,6 +333,12 @@ func (p *PoolAllocator) occupyCIDR(targetNode, sourcePool string, cidr netip.Pre
 	if p.isAllocated(targetNode, sourcePool, cidr) {
 		return nil
 	}
+
+	log.WithFields(logrus.Fields{
+		"targetNode": targetNode,
+		"sourcePool": sourcePool,
+		"cidr":       cidr.String(),
+	}).Debug("occupying cidr")
 
 	pool, ok := p.pools[sourcePool]
 	if !ok {
@@ -331,6 +360,12 @@ func (p *PoolAllocator) releaseCIDR(targetNode, sourcePool string, cidr netip.Pr
 	if !p.isAllocated(targetNode, sourcePool, cidr) {
 		return nil
 	}
+
+	log.WithFields(logrus.Fields{
+		"targetNode": targetNode,
+		"sourcePool": sourcePool,
+		"cidr":       cidr.String(),
+	}).Debug("releasing cidr")
 
 	pool, ok := p.pools[sourcePool]
 	if !ok {

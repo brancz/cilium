@@ -5,6 +5,7 @@ package v2
 
 import (
 	"fmt"
+	"math/big"
 	"net/netip"
 	"strings"
 	"testing"
@@ -328,6 +329,58 @@ func TestPoolAllocator_AllocateToNode(t *testing.T) {
 				if diff := cmp.Diff(tt.args, tt.want); diff != "" {
 					t.Errorf("AllocateToNode() diff = %s", diff)
 				}
+			}
+		})
+	}
+}
+
+func Test_addrsInPrefix(t *testing.T) {
+	mustParseBigInt := func(s string) *big.Int {
+		r := new(big.Int)
+		r.SetString(s, 0)
+		return r
+	}
+
+	tests := []struct {
+		name string
+		args netip.Prefix
+		want *big.Int
+	}{
+		{
+			name: "ipv4",
+			args: netip.MustParsePrefix("10.0.0.0/24"),
+			want: big.NewInt(254),
+		},
+		{
+			name: "ipv6",
+			args: netip.MustParsePrefix("f00d::/48"),
+			want: mustParseBigInt("1208925819614629174706174"),
+		},
+		{
+			name: "zero",
+			args: netip.Prefix{},
+			want: big.NewInt(0),
+		},
+		{
+			name: "two",
+			args: netip.MustParsePrefix("10.0.0.0/30"),
+			want: big.NewInt(2),
+		},
+		{
+			name: "underflow /31",
+			args: netip.MustParsePrefix("10.0.0.0/31"),
+			want: big.NewInt(0),
+		},
+		{
+			name: "underflow /32",
+			args: netip.MustParsePrefix("10.0.0.0/32"),
+			want: big.NewInt(0),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := addrsInPrefix(tt.args); got.Cmp(tt.want) != 0 {
+				t.Errorf("addrsInPrefix() = %v, want %v", got, tt.want)
 			}
 		})
 	}
