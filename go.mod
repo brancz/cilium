@@ -62,7 +62,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.27.2
-	github.com/osrg/gobgp/v3 v3.11.0
+	github.com/osrg/gobgp/v3 v3.12.0
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
@@ -100,7 +100,7 @@ require (
 	golang.org/x/tools v0.6.0
 	golang.zx2c4.com/wireguard v0.0.0-20230223181233-21636207a675
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20230215201556-9c5414ab4bde
-	google.golang.org/genproto v0.0.0-20230227214838-9b19f0bdc514
+	google.golang.org/genproto v0.0.0-20230301171018-9ab4bdc49ad5
 	google.golang.org/grpc v1.53.0
 	google.golang.org/protobuf v1.28.1
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
